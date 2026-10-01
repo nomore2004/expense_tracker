@@ -4,14 +4,13 @@ import bcrypt from "bcryptjs";
 const prisma = new PrismaClient();
 
 async function main() {
-  console.log("Seeding development database with a 3-roommate household...");
+  const existingUsers = await prisma.user.count();
+  if (existingUsers > 0) {
+    console.log("Database already has existing users. Skipping seed.");
+    return;
+  }
 
-  // Clean up any existing data in reverse dependency order
-  await prisma.expenseSplit.deleteMany();
-  await prisma.settlement.deleteMany();
-  await prisma.expense.deleteMany();
-  await prisma.user.deleteMany();
-  await prisma.household.deleteMany();
+  console.log("Seeding database with the 3 roommates...");
 
   // 1. Create the Test Household
   const household = await prisma.household.create({
