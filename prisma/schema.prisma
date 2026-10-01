@@ -1,0 +1,102 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Household {
+  id          String       @id @default(cuid())
+  name        String
+  currency    String       @default("INR")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+
+  users       User[]
+  expenses    Expense[]
+  settlements Settlement[]
+
+  @@map("households")
+}
+
+model User {
+  id                  String         @id @default(cuid())
+  householdId         String         @map("household_id")
+  name                String
+  email               String         @unique
+  passwordHash        String         @map("password_hash")
+  isActive            Boolean        @default(true) @map("is_active")
+  createdAt           DateTime       @default(now()) @map("created_at")
+  updatedAt           DateTime       @updatedAt @map("updated_at")
+
+  household           Household      @relation(fields: [householdId], references: [id], onDelete: Restrict)
+  paidExpenses        Expense[]      @relation("ExpensePayer")
+  assignedSplits      ExpenseSplit[]
+  sentSettlements     Settlement[]   @relation("SettlementPayer")
+  receivedSettlements Settlement[]   @relation("SettlementReceiver")
+
+  @@index([householdId, isActive], map: "idx_users_household")
+  @@map("users")
+}
+
+model Expense {
+  id            String         @id @default(cuid())
+  householdId   String         @map("household_id")
+  payerId       String         @map("payer_id")
+  description   String
+  amountInPaise Int            @map("amount_in_paise") // Integer minor units (e.g. 10000 = ₹100.00)
+  expenseType   String         @default("SHARED") @map("expense_type") // SHARED, PERSONAL, CUSTOM
+  expenseDate   DateTime       @default(now()) @map("expense_date")
+  version       Int            @default(1)
+  isDeleted     Boolean        @default(false) @map("is_deleted")
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+
+  household     Household      @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  payer         User           @relation("ExpensePayer", fields: [payerId], references: [id], onDelete: Restrict)
+  splits        ExpenseSplit[]
+
+  @@index([householdId, isDeleted, expenseDate], map: "idx_expenses_tenant_history")
+  @@index([payerId, isDeleted], map: "idx_expenses_payer")
+  @@map("expenses")
+}
+
+model ExpenseSplit {
+  id            String   @id @default(cuid())
+  expenseId     String   @map("expense_id")
+  userId        String   @map("user_id")
+  amountInPaise Int      @map("amount_in_paise") // Integer minor units
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  expense       Expense  @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  user          User     @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([expenseId, userId], map: "uniq_splits_expense_user")
+  @@index([userId, amountInPaise], map: "idx_splits_user")
+  @@map("expense_splits")
+}
+
+model Settlement {
+  id             String   @id @default(cuid())
+  householdId    String   @map("household_id")
+  payerId        String   @map("payer_id")
+  receiverId     String   @map("receiver_id")
+  amountInPaise  Int      @map("amount_in_paise") // Integer minor units
+  settlementDate DateTime @default(now()) @map("settlement_date")
+  note           String?
+  idempotencyKey String?  @unique @map("idempotency_key")
+  isDeleted      Boolean  @default(false) @map("is_deleted")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  household      Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  payer          User      @relation("SettlementPayer", fields: [payerId], references: [id], onDelete: Restrict)
+  receiver       User      @relation("SettlementReceiver", fields: [receiverId], references: [id], onDelete: Restrict)
+
+  @@index([householdId, isDeleted, settlementDate], map: "idx_settlements_tenant_history")
+  @@index([payerId, isDeleted], map: "idx_settlements_payer")
+  @@index([receiverId, isDeleted], map: "idx_settlements_receiver")
+  @@map("settlements")
+}
