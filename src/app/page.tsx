@@ -19,7 +19,7 @@ export default async function DashboardPage() {
           Roommate Expense Tracker
         </h1>
         <p className="mt-4 text-base text-gray-600 sm:text-lg">
-          Accurately track shared groceries, bills, personal expenses, and settlements for exactly 3 roommates with zero penny loss.
+          Track shared expenses between roommates. When someone buys something, it automatically splits equally and shows who owes whom.
         </p>
 
         <div className="mt-8 flex flex-col sm:flex-row justify-center gap-3">
@@ -27,7 +27,7 @@ export default async function DashboardPage() {
             href="/login"
             className="w-full sm:w-auto rounded-lg bg-blue-600 px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 transition-colors"
           >
-            Log In to Your Household
+            Log In
           </Link>
           <Link
             href="/register"
@@ -49,16 +49,45 @@ export default async function DashboardPage() {
 
   const balances = balanceRes.success && balanceRes.data ? balanceRes.data.balances : [];
   const totalSpending = balanceRes.success && balanceRes.data ? balanceRes.data.totalHouseholdSpendingInPaise : 0;
-  const recentExpenses = expenseRes.success ? expenseRes.data.slice(0, 5) : [];
+  const recentExpenses = expenseRes.success ? expenseRes.data.slice(0, 10) : [];
   const recentSettlements = settlementRes.success ? settlementRes.data.slice(0, 5) : [];
 
-  // Current user's individual financial breakdown
+  // Current user's balance
   const mySummary = balances.find((b) => b.userId === user.userId);
   const myNetBalance = mySummary ? mySummary.netBalanceInPaise : 0;
-  const myTotalPaid = mySummary ? mySummary.totalPaidInPaise : 0;
-  const myTotalShare = mySummary ? mySummary.totalShareInPaise : 0;
 
-  // Debt/Credit Status
+  // Calculate "who owes whom" - the part user really cares about
+  // People with negative balance owe money to people with positive balance
+  const creditors = balances.filter((b) => b.netBalanceInPaise > 0).sort((a, b) => b.netBalanceInPaise - a.netBalanceInPaise);
+  const debtors = balances.filter((b) => b.netBalanceInPaise < 0).sort((a, b) => a.netBalanceInPaise - b.netBalanceInPaise);
+
+  // Calculate simplified debts (who should pay whom)
+  const debts: Array<{ from: string; fromName: string; to: string; toName: string; amount: number }> = [];
+  const debtorsCopy = debtors.map((d) => ({ ...d, remaining: Math.abs(d.netBalanceInPaise) }));
+  const creditorsCopy = creditors.map((c) => ({ ...c, remaining: c.netBalanceInPaise }));
+
+  for (const debtor of debtorsCopy) {
+    for (const creditor of creditorsCopy) {
+      if (debtor.remaining <= 0 || creditor.remaining <= 0) continue;
+      const payment = Math.min(debtor.remaining, creditor.remaining);
+      if (payment > 0) {
+        debts.push({
+          from: debtor.userId,
+          fromName: debtor.name,
+          to: creditor.userId,
+          toName: creditor.name,
+          amount: payment,
+        });
+        debtor.remaining -= payment;
+        creditor.remaining -= payment;
+      }
+    }
+  }
+
+  // What does the current user owe or is owed?
+  const myDebts = debts.filter((d) => d.from === user.userId);
+  const myCredits = debts.filter((d) => d.to === user.userId);
+
   const isPositive = myNetBalance > 0;
   const isNegative = myNetBalance < 0;
   const isZero = myNetBalance === 0;
@@ -69,10 +98,10 @@ export default async function DashboardPage() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-gray-900">
-            Welcome back, {user.name}!
+            Hi, {user.name}!
           </h1>
           <p className="text-sm text-gray-600">
-            Here is your live household financial overview
+            Total household spending: {formatRupees(totalSpending)}
           </p>
         </div>
         <div className="flex flex-wrap gap-2.5">
@@ -80,81 +109,111 @@ export default async function DashboardPage() {
             href="/expenses/new"
             className="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg shadow-sm hover:bg-blue-700 transition-colors"
           >
-            + Add Expense
+            + I Bought Something
           </Link>
           <Link
             href="/settlements/new"
             className="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg shadow-sm hover:bg-emerald-700 transition-colors"
           >
-            + Settle Debt
+            + I Paid Someone Back
           </Link>
         </div>
       </div>
 
-      {/* Main Net Balance Hero Card */}
+      {/* YOUR STATUS - Big clear card */}
       <div
-        className={`p-6 sm:p-8 rounded-2xl border shadow-sm transition-all ${
+        className={`p-6 sm:p-8 rounded-2xl border-2 shadow-sm ${
           isPositive
-            ? "bg-emerald-50/60 border-emerald-200"
+            ? "bg-emerald-50 border-emerald-300"
             : isNegative
-            ? "bg-rose-50/60 border-rose-200"
-            : "bg-white border-gray-200"
+            ? "bg-rose-50 border-rose-300"
+            : "bg-gray-50 border-gray-300"
         }`}
       >
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <span className="text-xs font-bold uppercase tracking-wider text-gray-500">
-              Your Current Balance
-            </span>
-            <div className="mt-1 flex items-baseline gap-2">
-              <span
-                className={`text-3xl sm:text-4xl font-extrabold ${
-                  isPositive
-                    ? "text-emerald-700"
-                    : isNegative
-                    ? "text-rose-700"
-                    : "text-gray-900"
-                }`}
-              >
-                {formatRupees(myNetBalance)}
-              </span>
-              <span className="text-sm font-medium text-gray-600">
-                {isPositive
-                  ? "(You are owed money)"
-                  : isNegative
-                  ? "(You owe money)"
-                  : "(All settled up! 🎉)"}
-              </span>
-            </div>
-            <p className="mt-2 text-xs text-gray-600">
-              {isPositive && "Other roommates will pay you to clear this balance."}
-              {isNegative && "Make a settlement payment to your roommates to clear this debt."}
-              {isZero && "You do not owe or have to receive any money."}
-            </p>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4 border-t sm:border-t-0 sm:border-l border-gray-200 pt-4 sm:pt-0 sm:pl-8">
-            <div>
-              <span className="text-xs font-semibold text-gray-500 block">Total You Paid</span>
-              <span className="text-lg font-bold text-gray-900">{formatRupees(myTotalPaid)}</span>
-            </div>
-            <div>
-              <span className="text-xs font-semibold text-gray-500 block">Your Share</span>
-              <span className="text-lg font-bold text-gray-900">{formatRupees(myTotalShare)}</span>
-            </div>
-          </div>
+        <div className="text-center">
+          <span
+            className={`text-4xl sm:text-5xl font-extrabold ${
+              isPositive
+                ? "text-emerald-700"
+                : isNegative
+                ? "text-rose-700"
+                : "text-gray-700"
+            }`}
+          >
+            {formatRupees(myNetBalance)}
+          </span>
+          <p className="mt-2 text-lg font-semibold text-gray-800">
+            {isPositive
+              ? "💰 Others owe you money"
+              : isNegative
+              ? "📋 You owe money"
+              : "✅ All settled up!"}
+          </p>
         </div>
+
+        {/* What YOU specifically owe */}
+        {myDebts.length > 0 && (
+          <div className="mt-4 space-y-2">
+            {myDebts.map((d, i) => (
+              <div
+                key={i}
+                className="flex items-center justify-between bg-white rounded-lg px-4 py-3 border border-rose-200"
+              >
+                <span className="text-sm font-medium text-gray-800">
+                  You owe <span className="font-bold">{d.toName}</span>
+                </span>
+                <span className="text-lg font-bold text-rose-600">
+                  {formatRupees(d.amount)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* What others owe YOU */}
+        {myCredits.length > 0 && (
+          <div className="mt-4 space-y-2">
+            {myCredits.map((d, i) => (
+              <div
+                key={i}
+                className="flex items-center justify-between bg-white rounded-lg px-4 py-3 border border-emerald-200"
+              >
+                <span className="text-sm font-medium text-gray-800">
+                  <span className="font-bold">{d.fromName}</span> owes you
+                </span>
+                <span className="text-lg font-bold text-emerald-600">
+                  {formatRupees(d.amount)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
-      {/* Household Roommates Balances Grid */}
-      <div>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-bold text-gray-900">Roommate Balances</h2>
-          <span className="text-xs text-gray-500 font-medium">
-            Total Household Spent: {formatRupees(totalSpending)}
-          </span>
+      {/* WHO OWES WHOM - The complete picture */}
+      {debts.length > 0 && (
+        <div>
+          <h2 className="text-lg font-bold text-gray-900 mb-3">💸 Who Owes Whom</h2>
+          <div className="bg-white rounded-xl border border-gray-200 shadow-sm divide-y divide-gray-100">
+            {debts.map((d, i) => (
+              <div key={i} className="flex items-center justify-between px-5 py-4">
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="font-bold text-rose-600">{d.fromName}</span>
+                  <span className="text-gray-400">→</span>
+                  <span className="font-bold text-emerald-600">{d.toName}</span>
+                </div>
+                <span className="text-base font-bold text-gray-900">
+                  {formatRupees(d.amount)}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
+      )}
 
+      {/* EVERYONE'S BALANCE - Simple cards */}
+      <div>
+        <h2 className="text-lg font-bold text-gray-900 mb-3">👥 Everyone&apos;s Balance</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {balances.map((roommate) => {
             const isMe = roommate.userId === user.userId;
@@ -164,40 +223,34 @@ export default async function DashboardPage() {
             return (
               <div
                 key={roommate.userId}
-                className={`p-5 rounded-xl border bg-white shadow-xs space-y-3 ${
-                  isMe ? "ring-2 ring-blue-500/20 border-blue-300" : "border-gray-200"
+                className={`p-5 rounded-xl border bg-white shadow-xs text-center ${
+                  isMe ? "ring-2 ring-blue-500/30 border-blue-300" : "border-gray-200"
                 }`}
               >
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold text-gray-900 text-sm">
-                    {roommate.name} {isMe && <span className="text-xs text-blue-600 font-normal">(You)</span>}
-                  </span>
-                  <span
-                    className={`text-xs px-2 py-0.5 rounded-full font-bold ${
-                      rPositive
-                        ? "bg-emerald-100 text-emerald-800"
-                        : rNegative
-                        ? "bg-rose-100 text-rose-800"
-                        : "bg-gray-100 text-gray-700"
-                    }`}
-                  >
-                    {rPositive ? "Owed" : rNegative ? "Owes" : "Settled"}
-                  </span>
+                <div className="font-semibold text-gray-900 text-base">
+                  {roommate.name} {isMe && <span className="text-xs text-blue-600 font-normal">(You)</span>}
                 </div>
-
-                <div className="text-2xl font-bold text-gray-900">
+                <div
+                  className={`text-2xl font-bold mt-1 ${
+                    rPositive
+                      ? "text-emerald-600"
+                      : rNegative
+                      ? "text-rose-600"
+                      : "text-gray-600"
+                  }`}
+                >
                   {formatRupees(roommate.netBalanceInPaise)}
                 </div>
-
-                <div className="pt-2 border-t border-gray-100 text-xs text-gray-500 space-y-1">
-                  <div className="flex justify-between">
-                    <span>Paid for expenses:</span>
-                    <span className="font-medium text-gray-700">{formatRupees(roommate.totalPaidInPaise)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Personal share:</span>
-                    <span className="font-medium text-gray-700">{formatRupees(roommate.totalShareInPaise)}</span>
-                  </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  {rPositive
+                    ? "is owed money"
+                    : rNegative
+                    ? "owes money"
+                    : "all settled ✅"}
+                </div>
+                <div className="mt-2 pt-2 border-t border-gray-100 text-xs text-gray-500 space-y-0.5">
+                  <div>Paid: {formatRupees(roommate.totalPaidInPaise)}</div>
+                  <div>Share: {formatRupees(roommate.totalShareInPaise)}</div>
                 </div>
               </div>
             );
@@ -205,74 +258,93 @@ export default async function DashboardPage() {
         </div>
       </div>
 
-      {/* Recent Activity Split View */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {/* Recent Expenses */}
-        <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-base font-bold text-gray-900">Recent Expenses</h3>
-            <Link href="/expenses" className="text-xs font-semibold text-blue-600 hover:text-blue-800">
-              View all &rarr;
-            </Link>
-          </div>
-
-          {recentExpenses.length === 0 ? (
-            <p className="text-sm text-gray-500 py-6 text-center">No expenses recorded yet.</p>
-          ) : (
-            <ul className="divide-y divide-gray-100">
-              {recentExpenses.map((exp) => (
-                <li key={exp.id} className="py-3 flex items-center justify-between text-sm">
-                  <div>
-                    <span className="font-medium text-gray-900 block">{exp.description}</span>
-                    <span className="text-xs text-gray-500">
-                      Paid by {exp.payer.name} on{" "}
-                      {new Date(exp.expenseDate).toLocaleDateString("en-IN", {
-                        month: "short",
-                        day: "numeric",
-                      })}
-                    </span>
-                  </div>
-                  <span className="font-bold text-gray-900">{formatRupees(exp.amountInPaise)}</span>
-                </li>
-              ))}
-            </ul>
-          )}
+      {/* RECENT EXPENSES */}
+      <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-base font-bold text-gray-900">🧾 Recent Expenses</h3>
+          <Link href="/expenses" className="text-xs font-semibold text-blue-600 hover:text-blue-800">
+            View all &rarr;
+          </Link>
         </div>
 
-        {/* Recent Settlements */}
+        {recentExpenses.length === 0 ? (
+          <p className="text-sm text-gray-500 py-6 text-center">No expenses recorded yet. Click &quot;I Bought Something&quot; to add one!</p>
+        ) : (
+          <ul className="divide-y divide-gray-100">
+            {recentExpenses.map((exp) => {
+              // Show how this expense affects the current user
+              const mySplit = exp.splits.find((s) => s.userId === user.userId);
+              const iPaid = exp.payerId === user.userId;
+
+              return (
+                <li key={exp.id} className="py-3">
+                  <div className="flex items-center justify-between text-sm">
+                    <div>
+                      <span className="font-medium text-gray-900 block">{exp.description}</span>
+                      <span className="text-xs text-gray-500">
+                        {iPaid ? "You paid" : `${exp.payer.name} paid`}{" "}
+                        {formatRupees(exp.amountInPaise)} &bull;{" "}
+                        {new Date(exp.expenseDate).toLocaleDateString("en-IN", {
+                          month: "short",
+                          day: "numeric",
+                        })}
+                      </span>
+                    </div>
+                    <div className="text-right">
+                      {mySplit && (
+                        <span className="text-xs text-gray-500 block">
+                          Your share: {formatRupees(mySplit.amountInPaise)}
+                        </span>
+                      )}
+                      {iPaid && mySplit && (
+                        <span className="text-xs font-semibold text-emerald-600">
+                          Others owe you {formatRupees(exp.amountInPaise - mySplit.amountInPaise)}
+                        </span>
+                      )}
+                      {!iPaid && mySplit && (
+                        <span className="text-xs font-semibold text-rose-600">
+                          You owe {formatRupees(mySplit.amountInPaise)}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+
+      {/* RECENT SETTLEMENTS */}
+      {recentSettlements.length > 0 && (
         <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm space-y-4">
           <div className="flex items-center justify-between">
-            <h3 className="text-base font-bold text-gray-900">Recent Settlements</h3>
+            <h3 className="text-base font-bold text-gray-900">🤝 Recent Payments</h3>
             <Link href="/settlements" className="text-xs font-semibold text-emerald-600 hover:text-emerald-800">
               View all &rarr;
             </Link>
           </div>
-
-          {recentSettlements.length === 0 ? (
-            <p className="text-sm text-gray-500 py-6 text-center">No settlements recorded yet.</p>
-          ) : (
-            <ul className="divide-y divide-gray-100">
-              {recentSettlements.map((st) => (
-                <li key={st.id} className="py-3 flex items-center justify-between text-sm">
-                  <div>
-                    <span className="font-medium text-gray-900 block">
-                      {st.payer.name} &rarr; {st.receiver.name}
-                    </span>
-                    <span className="text-xs text-gray-500">
-                      {new Date(st.settlementDate).toLocaleDateString("en-IN", {
-                        month: "short",
-                        day: "numeric",
-                      })}
-                      {st.note ? ` &bull; ${st.note}` : ""}
-                    </span>
-                  </div>
-                  <span className="font-bold text-emerald-600">{formatRupees(st.amountInPaise)}</span>
-                </li>
-              ))}
-            </ul>
-          )}
+          <ul className="divide-y divide-gray-100">
+            {recentSettlements.map((st) => (
+              <li key={st.id} className="py-3 flex items-center justify-between text-sm">
+                <div>
+                  <span className="font-medium text-gray-900 block">
+                    {st.payer.name} paid {st.receiver.name}
+                  </span>
+                  <span className="text-xs text-gray-500">
+                    {new Date(st.settlementDate).toLocaleDateString("en-IN", {
+                      month: "short",
+                      day: "numeric",
+                    })}
+                    {st.note ? ` • ${st.note}` : ""}
+                  </span>
+                </div>
+                <span className="font-bold text-emerald-600">{formatRupees(st.amountInPaise)}</span>
+              </li>
+            ))}
+          </ul>
         </div>
-      </div>
+      )}
     </div>
   );
 }
